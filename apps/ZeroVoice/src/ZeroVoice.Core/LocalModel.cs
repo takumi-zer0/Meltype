@@ -30,7 +30,7 @@ public sealed class LocalModel(string baseDirectory, LocalModelConfig config, Ac
             if (!config.Files.Any(f => Resolve(f.Path) == exe)) throw new InvalidDataException("推論実行ファイルの検証情報がありません。");
             var model = Resolve(config.Model);
             locks.Add(await VerifyAsync(model, config.ModelSha256, token));
-            var input = Correction.BuildInput(request);
+            var input = Correction.BuildInput(ContextTerms.Prepare(request));
             var start = new ProcessStartInfo(exe) {
                 UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Path.GetDirectoryName(exe)!,
                 RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,

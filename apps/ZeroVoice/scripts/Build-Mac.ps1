@@ -22,6 +22,7 @@ $manifest=@(Get-ChildItem -LiteralPath (Join-Path $app 'backend') -File -Recurse
 @{executable=[IO.Path]::GetRelativePath($app,$llama.FullName).Replace('\','/');model='models/Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf';modelSha256='2fde00ce69dd4899c70d020845e2638353015bba0fdf161b3eb965f2bca4464e';files=$manifest;gpuLayers=99} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $app 'model.json') -Encoding utf8
 Copy-Item -LiteralPath (Join-Path $sourceRoot 'native\macos\Info.plist') -Destination $contents
 Copy-Item -LiteralPath (Join-Path $sourceRoot 'README-ja.md') -Destination $package
+Copy-Item -LiteralPath (Join-Path $sourceRoot 'VALIDATION-ja.md') -Destination $package
 foreach($file in @('Setup-Model.command','Connect-Handy.command','Disconnect-Handy.command')){Copy-Item -LiteralPath (Join-Path $sourceRoot ('scripts\'+$file)) -Destination $package}
 foreach($notice in @('LICENSE','THIRD-PARTY-NOTICES.md','licenses')){Copy-Item -LiteralPath (Join-Path $sourceRoot $notice) -Destination $package -Recurse -Force}
 Write-Output ('Built: '+$package)

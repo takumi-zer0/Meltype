@@ -1,0 +1,22 @@
+[
+  {
+    "Id": "homophone",
+    "Original": "この機能の使用を確認してください。",
+    "Text": "この機能の仕様を確認してください。",
+    "Rejected": false,
+    "Warnings": [
+      "意味・固有名詞・条件を確認してから入力してください。"
+    ],
+    "ElapsedMs": 22013
+  },
+  {
+    "Id": "homophone-clear",
+    "Original": "この文章を公正してください。",
+    "Text": "この文章を校正してください。",
+    "Rejected": false,
+    "Warnings": [
+      "意味・固有名詞・条件を確認してから入力してください。"
+    ],
+    "ElapsedMs": 20279
+  }
+]

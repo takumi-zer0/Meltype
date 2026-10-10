@@ -1,0 +1,52 @@
+[
+  {
+    "Id": "terms",
+    "Original": "えーと、クロードコードでギットハブのプルリクを確認してください。",
+    "Text": "Claude CodeでGitHubのプルリクを確認してください。",
+    "Rejected": false,
+    "Warnings": [
+      "意味・固有名詞・条件を確認してから入力してください。"
+    ],
+    "ElapsedMs": 23006
+  },
+  {
+    "Id": "negation",
+    "Original": "自動更新は有効にしないでください。",
+    "Text": "自動更新は有効にしないでください。",
+    "Rejected": true,
+    "Warnings": [
+      "否定表現の変更を検出。原文を残しました。"
+    ],
+    "ElapsedMs": 19645
+  },
+  {
+    "Id": "spoken",
+    "Original": "あの、明日の打ち合わせなんですけど、午後三時に変更できるか確認をお願いしたいです。",
+    "Text": "あの、明日の打ち合わせなんですけど、午後三時に変更できるか確認をお願いしたいです。",
+    "Rejected": true,
+    "Warnings": [
+      "期限・条件表現の変更を検出。原文を残しました。"
+    ],
+    "ElapsedMs": 21930
+  },
+  {
+    "Id": "homophone-clear",
+    "Original": "この文章を公正してください。",
+    "Text": "この文章を公正にしてください。",
+    "Rejected": false,
+    "Warnings": [
+      "意味・固有名詞・条件を確認してから入力してください。"
+    ],
+    "ElapsedMs": 19199
+  },
+  {
+    "Id": "spoken-simple",
+    "Original": "あの、田中さんにこの資料の確認をお願いしたいんですけど。",
+    "Text": "田中さんにこの資料の確認をお願いします。",
+    "Rejected": false,
+    "Warnings": [
+      "意味・固有名詞・条件を確認してから入力してください。"
+    ],
+    "ElapsedMs": 19432
+  }
+]

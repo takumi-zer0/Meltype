@@ -54,4 +54,15 @@ Check(Correction.Parse(contextRequest, "{\"text\":\"同僚に送るメッセー�
 Check(!Correction.Parse(contextRequest, "{\"text\":\"明日の予定を確認してください。\"}", 0).Rejected,"参考文脈を混ぜない応答は受理する");
 Check(System.Text.Json.Nodes.JsonNode.DeepEquals(HandyIntegration.Restore(before.DeepClone().AsObject(),prepared.Backup),before),"設定保存前に中断した連携を復旧できる");
 Check(Answer("午後三時に変更できるか確認してください。", "午後三時までに変更できるか確認してください。").Rejected,"時刻を期限に変える応答を拒否する");
+string Contextual(string text,string context) => ContextTerms.Prepare(new(text,context,[])).Transcript;
+Check(Contextual("この文章を公正してください。","誤字脱字と表記揺れを直す編集作業です。") == "この文章を校正してください。","編集の複数の手がかりから校正を選ぶ");
+Check(Contextual("この機能の使用を確認してください。","設計書の要件と実装を照合しています。") == "この機能の仕様を確認してください。","設計の文脈から仕様を選ぶ");
+Check(Contextual("その判断は校正です。","公平で中立な審査が必要です。") == "その判断は公正です。","逆の文脈では公正を選ぶ");
+Check(Contextual("交通費の生産をお願いします。","領収書に基づく経費と旅費の処理です。") == "交通費の精算をお願いします。","経費の文脈から精算を選ぶ");
+Check(Contextual("部品の精算を止めます。","工場で製品を製造しています。") == "部品の生産を止めます。","製造の文脈では生産を選ぶ");
+Check(Contextual("仕様を確認します。","操作手順と使い方の説明です。") == "使用を確認します。","操作の文脈では使用を選ぶ");
+Check(Contextual("この文章を公正にしてください。","編集の相談です。") == "この文章を公正にしてください。","手がかりが一つなら変えない");
+Check(Contextual("この文章を公正にしてください。","誤字と脱字、公平で中立な審査の両方に関する話です。") == "この文章を公正にしてください。","根拠が競合したら変えない");
+Check(Contextual("使用方法を確認してください。","設計書の要件と実装を照合します。") == "使用方法を確認してください。","複合語の途中を置換しない");
+Check(Contextual("この文章を公正にしてください。","") == "この文章を公正にしてください。","文脈を使わなければ辞書補正もしない");
 Console.WriteLine($"{passed} checks passed in total");
