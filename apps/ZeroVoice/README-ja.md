@@ -12,6 +12,8 @@
 
 Macはアーカイブ同梱の `Setup-Model.command` でモデルをダウンロードして検証します。モデルは `~/Library/Application Support/Handy-ZeroVoice/models/` に保存し、署名したアプリ本体の中身は変更しません。Windowsのモデル保存先は `%LOCALAPPDATA%/Handy-ZeroVoice/models/` です。クラウド送信と共有サーバーはまだ組み込んでいません。
 
+速度・品質の実測は [Handy組み込み版の比較](validation/HANDY-COMPARISON-ja.md) を参照。Gemma E2B/E4BとGPT-6 Lunaを同じ24例で比較しました。Lunaの評価コードは `validation/CloudBench`。認証情報をソースや配布物へ含めない構成です。
+
 以下は以前の**独立アプリ版**の説明です。組み込み版では `Connect-Handy` の操作は不要です。
 
 ## 独立アプリ版

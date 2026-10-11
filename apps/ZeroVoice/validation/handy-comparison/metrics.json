@@ -1,0 +1,58 @@
+[
+  {
+    "name": "Gemma 4 E2B: short",
+    "n": 12,
+    "medianMs": 2320.0,
+    "minMs": 1751,
+    "maxMs": 4157,
+    "initialLoadMs": 7791
+  },
+  {
+    "name": "Gemma 4 E2B: sentences + controls",
+    "n": 12,
+    "medianMs": 4702.0,
+    "minMs": 1474,
+    "maxMs": 6424,
+    "initialLoadMs": 7773
+  },
+  {
+    "name": "Gemma 4 E4B: short",
+    "n": 12,
+    "medianMs": 5985.5,
+    "minMs": 4720,
+    "maxMs": 9753,
+    "initialLoadMs": 32800
+  },
+  {
+    "name": "Gemma 4 E4B: sentences + controls",
+    "n": 12,
+    "medianMs": 8190.0,
+    "minMs": 3737,
+    "maxMs": 12050,
+    "initialLoadMs": 32800
+  },
+  {
+    "name": "GPT-6 Luna none: short",
+    "n": 12,
+    "medianMs": 1620.0,
+    "minMs": 1011,
+    "maxMs": 3672,
+    "initialLoadMs": null
+  },
+  {
+    "name": "GPT-6 Luna none: sentences + controls",
+    "n": 12,
+    "medianMs": 1423.5,
+    "minMs": 1213,
+    "maxMs": 2690,
+    "initialLoadMs": null
+  },
+  {
+    "name": "GPT-6 Luna none: all",
+    "n": 24,
+    "medianMs": 1459.5,
+    "minMs": 1011,
+    "maxMs": 3672,
+    "initialLoadMs": null
+  }
+]
