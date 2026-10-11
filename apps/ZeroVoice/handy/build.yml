@@ -140,7 +140,7 @@ jobs:
             Copy-Item handy/src-tauri/transcribe-libs/* package/ -Recurse
             Copy-Item handy/src-tauri/resources package/resources -Recurse
             Copy-Item apps/ZeroVoice/handy/Setup-Model.ps1 package/
-            & ./package/handy.exe --version
+            & ./package/handy.exe --help
             if($LASTEXITCODE){throw 'Packaged Handy startup failed'}
           }else{
             Copy-Item handy/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Handy.app package/ -Recurse
@@ -153,7 +153,7 @@ jobs:
             if('${{ matrix.rid }}' -eq 'osx-arm64'){
               & ./package/Handy.app/Contents/Resources/resources/zerovoice/ZeroVoice.Worker --check-runtime
               if($LASTEXITCODE){throw 'Packaged worker runtime check failed'}
-              & ./package/Handy.app/Contents/MacOS/handy --version
+              & ./package/Handy.app/Contents/MacOS/handy --help
               if($LASTEXITCODE){throw 'Packaged Handy startup failed'}
             }
             Copy-Item apps/ZeroVoice/handy/Setup-Model.command package/
@@ -169,3 +169,4 @@ jobs:
           name: Handy-ZeroVoice-${{ matrix.rid }}
           path: Handy-ZeroVoice-${{ matrix.rid }}.tar.gz
           retention-days: 7
+
