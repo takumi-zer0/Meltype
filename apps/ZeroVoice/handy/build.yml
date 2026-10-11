@@ -90,6 +90,8 @@ jobs:
           dotnet run --project apps/ZeroVoice/tests/ZeroVoice.Tests -c Release
           if($LASTEXITCODE){throw 'Correction checks failed'}
           ./apps/ZeroVoice/handy/build-worker.ps1 -Runtime ${{ matrix.rid }} -Output handy/src-tauri/resources/zerovoice
+          python apps/ZeroVoice/handy/prepare-runtime.py ${{ matrix.rid }} handy/src-tauri/resources/zerovoice
+          if($LASTEXITCODE){throw 'Runtime preparation failed'}
       - name: Frontend verification
         working-directory: handy
         run: |
