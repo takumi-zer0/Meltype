@@ -47,6 +47,10 @@ jobs:
           $ErrorActionPreference='Stop'
           git -C handy apply ../apps/ZeroVoice/handy/Handy.patch
           if($LASTEXITCODE){throw 'Patch failed'}
+          foreach($file in @('src/components/CorrectionReview.tsx','src/App.tsx','src/i18n/locales/en/translation.json','src/i18n/locales/ja/translation.json')){
+            $path=Join-Path (Resolve-Path handy).Path $file
+            [IO.File]::WriteAllText($path,[IO.File]::ReadAllText($path).Replace("`r`n","`n"),[Text.UTF8Encoding]::new($false))
+          }
           rustup toolchain install 1.99.0 --profile minimal --component clippy,rustfmt
           rustup default 1.99.0
           rustup target add ${{ matrix.target }}
@@ -92,6 +96,11 @@ jobs:
           ./apps/ZeroVoice/handy/build-worker.ps1 -Runtime ${{ matrix.rid }} -Output handy/src-tauri/resources/zerovoice
           python apps/ZeroVoice/handy/prepare-runtime.py ${{ matrix.rid }} handy/src-tauri/resources/zerovoice
           if($LASTEXITCODE){throw 'Runtime preparation failed'}
+          if('${{ matrix.rid }}' -ne 'osx-x64') {
+            $worker=if($IsWindows){'ZeroVoice.Worker.exe'}else{'ZeroVoice.Worker'}
+            & "./handy/src-tauri/resources/zerovoice/$worker" --check-runtime
+            if($LASTEXITCODE){throw 'Native runtime ABI check failed'}
+          }
       - name: Frontend verification
         working-directory: handy
         run: |
@@ -108,10 +117,10 @@ jobs:
         run: |
           cargo fmt --check
           if($LASTEXITCODE){throw 'Rust formatting failed'}
-          cargo clippy --locked --target ${{ matrix.target }}
+          cargo clippy --release --locked --target ${{ matrix.target }}
           if($LASTEXITCODE){throw 'Rust check failed'}
           if('${{ matrix.rid }}' -ne 'osx-x64') {
-            cargo test --locked --target ${{ matrix.target }} correction::tests --lib
+            cargo test --release --locked --target ${{ matrix.target }} correction::tests --lib
             if($LASTEXITCODE){throw 'Correction integration checks failed'}
           }
       - name: Build personal Handy
@@ -129,6 +138,12 @@ jobs:
             Copy-Item handy/src-tauri/resources package/resources -Recurse
           }else{
             Copy-Item handy/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Handy.app package/ -Recurse
+            python apps/ZeroVoice/handy/seal-package.py package/Handy.app/Contents/Resources/resources/zerovoice
+            if($LASTEXITCODE){throw 'Manifest sealing failed'}
+            codesign --force --sign - --options runtime --entitlements handy/src-tauri/Entitlements.plist package/Handy.app
+            if($LASTEXITCODE){throw 'Bundle signing failed'}
+            Copy-Item apps/ZeroVoice/handy/Setup-Model.command package/
+            chmod +x package/Setup-Model.command
           }
           Copy-Item apps/ZeroVoice/LICENSE package/ZeroVoice-LICENSE
           Copy-Item handy/LICENSE package/Handy-LICENSE

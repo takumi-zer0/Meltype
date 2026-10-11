@@ -1,5 +1,17 @@
+diff --git a/playwright.correction.config.ts b/playwright.correction.config.ts
+new file mode 100644
+index 0000000..d218d1c
+--- /dev/null
++++ b/playwright.correction.config.ts
+@@ -0,0 +1,6 @@
++import { defineConfig } from "@playwright/test";
++export default defineConfig({
++  testDir: "./tests", testMatch: "correction.spec.ts", workers: 1,
++  use: { baseURL: "http://127.0.0.1:1420", channel: "chrome", headless: true },
++  webServer: { command: "bun x vite dev --host 127.0.0.1", url: "http://127.0.0.1:1420/tests/correction.html", reuseExistingServer: true },
++});
 diff --git a/src-tauri/src/actions.rs b/src-tauri/src/actions.rs
-index 04d8864..680b47b 100644
+index 04d8864..c2c89dc 100644
 --- a/src-tauri/src/actions.rs
 +++ b/src-tauri/src/actions.rs
 @@ -386,6 +386,8 @@ pub(crate) async fn process_transcription_output(
@@ -11,7 +23,7 @@ index 04d8864..680b47b 100644
          let start_time = Instant::now();
          debug!("TranscribeAction::start called for binding: {}", binding_id);
  
-@@ -634,15 +636,9 @@ impl ShortcutAction for TranscribeAction {
+@@ -634,20 +636,13 @@ impl ShortcutAction for TranscribeAction {
                      utils::hide_recording_overlay(&ah);
                      set_tray_state(&ah, TrayIconState::Idle);
                  } else {
@@ -24,13 +36,20 @@ index 04d8864..680b47b 100644
 -                    let wav_handle = tauri::async_runtime::spawn_blocking(move || {
 -                        crate::audio_toolkit::save_wav_file(&wav_path, &samples_for_wav)
 -                    });
+-
+-                    // Transcribe concurrently with WAV save. If a live stream was
 +                    // This personal correction build keeps new dictations in memory only.
 +                    let file_name = String::new();
 +                    let wav_saved = false;
- 
-                     // Transcribe concurrently with WAV save. If a live stream was
++
++                    // If a live stream was
                      // running, finalize it and use its text (all audio was already
-@@ -659,30 +655,6 @@ impl ShortcutAction for TranscribeAction {
+                     // fed to the stream); otherwise batch-transcribe the samples.
+-                    let transcription_time = Instant::now();
+                     let transcription_result = match tm.finalize_stream() {
+                         // A finalized stream with usable text wins. An empty result
+                         // (no active stream, produced nothing, or the stream failed
+@@ -659,30 +654,6 @@ impl ShortcutAction for TranscribeAction {
                          Err(err) => Err(err),
                      };
  
@@ -61,7 +80,7 @@ index 04d8864..680b47b 100644
                      if rm.was_cancelled_since(cancel_generation) {
                          debug!("Transcription operation cancelled before output handling");
                          utils::hide_recording_overlay(&ah);
-@@ -692,85 +664,11 @@ impl ShortcutAction for TranscribeAction {
+@@ -692,85 +663,11 @@ impl ShortcutAction for TranscribeAction {
  
                      match transcription_result {
                          Ok(transcription) => {
@@ -154,7 +173,7 @@ index 04d8864..680b47b 100644
                          Err(err) => {
 diff --git a/src-tauri/src/correction.rs b/src-tauri/src/correction.rs
 new file mode 100644
-index 0000000..4a34773
+index 0000000..3ae2329
 --- /dev/null
 +++ b/src-tauri/src/correction.rs
 @@ -0,0 +1,453 @@
@@ -352,7 +371,7 @@ index 0000000..4a34773
 +        Ok(guard)
 +    }
 +    pub fn warm(&self) {
-+        let _ = self.worker();
++        drop(self.worker());
 +    }
 +    // Capture before any Handy window steals focus. Failed capture permits copy only.
 +    pub fn capture(&self) {
@@ -958,3 +977,81 @@ index ee58076..6c40cb1 100644
 +    "invalid": "文章の長さと制御文字を確認してください。"
    }
  }
+diff --git a/tests/correction-fixture.tsx b/tests/correction-fixture.tsx
+new file mode 100644
+index 0000000..54640dc
+--- /dev/null
++++ b/tests/correction-fixture.tsx
+@@ -0,0 +1,31 @@
++import React from "react";
++import ReactDOM from "react-dom/client";
++import i18n from "i18next";
++import { initReactI18next } from "react-i18next";
++import ja from "../src/i18n/locales/ja/translation.json";
++import { CorrectionReview } from "../src/components/CorrectionReview";
++import "../src/App.css";
++
++const calls: { command: string; args: Record<string, unknown> }[] = [];
++const fixture = {
++  id: 1, original: "えーと、この変更を本番に反映する前に既存の機能影響がないか確認してもらえますか。",
++  context: "リリース前の影響調査を依頼しています。",
++  text: "この変更を本番に反映する前に、既存の機能に影響がないか確認してもらえますか。",
++  warnings: [], busy: false, rejected: false, canPaste: true, elapsedMs: 2100,
++};
++Object.assign(window, {
++  testCalls: calls,
++  __TAURI_INTERNALS__: {
++    transformCallback: () => 1,
++    invoke: async (command: string, args: Record<string, unknown>) => {
++      calls.push({ command, args });
++      if (command === "correction_pending") return fixture;
++      return 1;
++    },
++  },
++  __TAURI_EVENT_PLUGIN_INTERNALS__: { unregisterListener: () => {} },
++});
++void i18n.use(initReactI18next).init({ lng: "ja", resources: { ja: { translation: ja } } }).then(() => {
++  const root = document.getElementById("root");
++  if (root) ReactDOM.createRoot(root).render(<CorrectionReview />);
++});
+diff --git a/tests/correction.html b/tests/correction.html
+new file mode 100644
+index 0000000..e1b92cf
+--- /dev/null
++++ b/tests/correction.html
+@@ -0,0 +1 @@
++<!doctype html><html lang="ja"><head><meta charset="UTF-8"></head><body><div id="root"></div><script type="module" src="./correction-fixture.tsx"></script></body></html>
+diff --git a/tests/correction.spec.ts b/tests/correction.spec.ts
+new file mode 100644
+index 0000000..22da43a
+--- /dev/null
++++ b/tests/correction.spec.ts
+@@ -0,0 +1,28 @@
++import { test, expect } from "@playwright/test";
++
++test("approval resets on edits and context changes block insertion", async ({ page }) => {
++  await page.goto("/tests/correction.html");
++  const paste = page.getByRole("button", { name: "元の入力欄に入力" });
++  const approve = page.getByRole("checkbox");
++  await expect(paste).toBeDisabled();
++  await approve.check();
++  await expect(paste).toBeEnabled();
++  await page.getByLabel("入力する文章（編集できます）").fill("手動で確認した文章です。");
++  await expect(approve).not.toBeChecked();
++  await expect(paste).toBeDisabled();
++  await approve.check();
++  await page.getByLabel("周辺の文脈（任意）").fill("変更した文脈です。");
++  await expect(approve).toBeDisabled();
++  await expect(paste).toBeDisabled();
++});
++
++test("copy sends only the explicitly reviewed text once", async ({ page }) => {
++  await page.goto("/tests/correction.html");
++  const text = "手動で確認した文章です。";
++  await page.getByLabel("入力する文章（編集できます）").fill(text);
++  await page.getByRole("checkbox").check();
++  await page.getByRole("button", { name: "コピー", exact: true }).click();
++  await expect(page.getByRole("dialog")).toHaveCount(0);
++  const calls = await page.evaluate(() => (window as unknown as { testCalls: {command: string; args: unknown}[] }).testCalls.filter(c => c.command === "correction_apply"));
++  expect(calls).toEqual([{ command: "correction_apply", args: { id: 1, text, approved: true, paste: false } }]);
++});

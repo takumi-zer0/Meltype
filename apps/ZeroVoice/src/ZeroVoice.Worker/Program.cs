@@ -11,7 +11,8 @@ var root = AppContext.BaseDirectory;
 try
 {
     var config = JsonSerializer.Deserialize<WorkerConfig>(await File.ReadAllTextAsync(Path.Combine(root,"worker-model.json")),json) ?? throw new InvalidDataException();
-    using var model = new ResidentModel(root,config);
+    using var model = new ResidentModel(root,config,args.SequenceEqual(["--check-runtime"]));
+    if(args.SequenceEqual(["--check-runtime"])) { Console.WriteLine("Verified runtime ABI; no model or user text loaded."); return 0; }
     if (args.Length == 3 && args[0] == "--benchmark")
     {
         var cases = JsonSerializer.Deserialize<BenchCase[]>(await File.ReadAllTextAsync(args[1]),json) ?? throw new InvalidDataException();
