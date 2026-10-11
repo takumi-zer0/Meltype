@@ -16,6 +16,7 @@ internal static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        if (args.Length == 1 && args[0] == "--prepare-cache") return PrepareCache().GetAwaiter().GetResult();
         if (args.Length == 3 && args[0] == "--benchmark") return Benchmark.Run(args.Skip(1).ToArray()).GetAwaiter().GetResult();
         if (args.Length == 2 && args[0] is "--connect-handy" or "--disconnect-handy")
         {
@@ -31,6 +32,25 @@ internal static class Program
         finally { Native.Dispose(); }
     }
     public static AppBuilder BuildApp() => AppBuilder.Configure<App>().UsePlatformDetect();
+    static async Task<int> PrepareCache()
+    {
+        try
+        {
+            var file = Path.Combine(Root, "model.json");
+            var json = await File.ReadAllTextAsync(file);
+            var config = JsonSerializer.Deserialize<LocalModelConfig>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? throw new InvalidDataException("モデル設定がありません。");
+            var cache = await new LocalModel(Root, config).PrepareCacheAsync();
+            // Setup publishes a complete manifest last. A failed preparation leaves the old configuration intact.
+            if (await File.ReadAllTextAsync(file) != json) throw new InvalidOperationException("設定が変更されたため保存しません。");
+            var temporary = file + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(config with { PrefixCache = cache }, new JsonSerializerOptions { WriteIndented = true }));
+            File.Move(temporary, file, overwrite: true);
+            Console.WriteLine("固定の校正指示を事前計算しました。利用者の文章は保存していません。");
+            return 0;
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException or OperationCanceledException or JsonException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        { Console.Error.WriteLine("事前計算に失敗しました。既存の設定は維持されます。"); return 1; }
+    }
     public static LocalModel? LoadModel(Action<string>? diagnostic = null)
     {
         var file = Path.Combine(Root, "model.json");

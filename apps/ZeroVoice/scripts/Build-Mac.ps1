@@ -23,6 +23,7 @@ $manifest=@(Get-ChildItem -LiteralPath (Join-Path $app 'backend') -File -Recurse
 Copy-Item -LiteralPath (Join-Path $sourceRoot 'native\macos\Info.plist') -Destination $contents
 Copy-Item -LiteralPath (Join-Path $sourceRoot 'README-ja.md') -Destination $package
 Copy-Item -LiteralPath (Join-Path $sourceRoot 'VALIDATION-ja.md') -Destination $package
+Copy-Item -LiteralPath (Join-Path $sourceRoot 'PERFORMANCE-ja.md') -Destination $package
 foreach($file in @('Setup-Model.command','Connect-Handy.command','Disconnect-Handy.command')){Copy-Item -LiteralPath (Join-Path $sourceRoot ('scripts\'+$file)) -Destination $package}
 foreach($notice in @('LICENSE','THIRD-PARTY-NOTICES.md','licenses')){Copy-Item -LiteralPath (Join-Path $sourceRoot $notice) -Destination $package -Recurse -Force}
 Write-Output ('Built: '+$package)

@@ -28,7 +28,10 @@ if($modelHash -ine '2fde00ce69dd4899c70d020845e2638353015bba0fdf161b3eb965f2bca4
 @{executable='backend/llama-completion.exe';model=('models/'+$modelName);modelSha256=$modelHash;files=$manifest;gpuLayers=99} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $outputRoot 'model.json') -Encoding utf8
 Copy-Item -LiteralPath (Join-Path $sourceRoot 'README-ja.md') -Destination (Join-Path $outputRoot 'README-ja.md')
 Copy-Item -LiteralPath (Join-Path $sourceRoot 'VALIDATION-ja.md') -Destination $outputRoot
+Copy-Item -LiteralPath (Join-Path $sourceRoot 'PERFORMANCE-ja.md') -Destination $outputRoot
 Copy-Item -LiteralPath (Join-Path $sourceRoot 'scripts\Connect-Handy.ps1') -Destination $outputRoot
 Copy-Item -LiteralPath (Join-Path $sourceRoot 'scripts\Disconnect-Handy.ps1') -Destination $outputRoot
 foreach($notice in @('LICENSE','THIRD-PARTY-NOTICES.md','licenses')){Copy-Item -LiteralPath (Join-Path $sourceRoot $notice) -Destination $outputRoot -Recurse -Force}
+& (Join-Path $outputRoot 'ZeroVoice.exe') --prepare-cache | Out-Host
+if($LASTEXITCODE -ne 0){throw 'Fixed instruction preparation failed'}
 Write-Output ('Built: '+$outputRoot)

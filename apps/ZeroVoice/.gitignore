@@ -3,6 +3,7 @@
 .vs/
 *.user
 *.gguf
+*.cache
 model.json
 *.zerovoice-backup.json
 benchmark-results.json

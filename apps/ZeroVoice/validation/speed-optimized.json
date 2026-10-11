@@ -1,0 +1,118 @@
+[
+  {
+    "Id": "terms",
+    "Original": "えーと、クロードコードでギットハブのプルリクを確認してください。",
+    "Text": "Claude CodeでGitHubのプルリクを確認してください。",
+    "Rejected": false,
+    "Warnings": [
+      "意味・固有名詞・条件を確認してから入力してください。"
+    ],
+    "ElapsedMs": 10838
+  },
+  {
+    "Id": "negation",
+    "Original": "自動更新は有効にしないでください。",
+    "Text": "自動更新は有効にしないでください。",
+    "Rejected": true,
+    "Warnings": [
+      "否定表現の変更を検出。原文を残しました。"
+    ],
+    "ElapsedMs": 8738
+  },
+  {
+    "Id": "spoken",
+    "Original": "あの、明日の打ち合わせなんですけど、午後三時に変更できるか確認をお願いしたいです。",
+    "Text": "あの、明日の打ち合わせなんですけど、午後三時に変更できるか確認をお願いしたいです。",
+    "Rejected": true,
+    "Warnings": [
+      "期限・条件表現の変更を検出。原文を残しました。"
+    ],
+    "ElapsedMs": 9144
+  },
+  {
+    "Id": "homophone-clear",
+    "Original": "この文章を公正してください。",
+    "Text": "この文章を校正してください。",
+    "Rejected": false,
+    "Warnings": [
+      "意味・固有名詞・条件を確認してから入力してください。"
+    ],
+    "ElapsedMs": 8227
+  },
+  {
+    "Id": "spoken-simple",
+    "Original": "あの、田中さんにこの資料の確認をお願いしたいんですけど。",
+    "Text": "田中さんにこの資料の確認をお願いします。",
+    "Rejected": false,
+    "Warnings": [
+      "意味・固有名詞・条件を確認してから入力してください。"
+    ],
+    "ElapsedMs": 7761
+  },
+  {
+    "Id": "specification",
+    "Original": "この機能の使用を確認してください。",
+    "Text": "この機能の仕様を確認してください。",
+    "Rejected": false,
+    "Warnings": [
+      "意味・固有名詞・条件を確認してから入力してください。"
+    ],
+    "ElapsedMs": 7210
+  },
+  {
+    "Id": "number",
+    "Original": "えーと、10月12日に3人で確認してください。",
+    "Text": "10月12日に3人で確認してください。",
+    "Rejected": false,
+    "Warnings": [
+      "意味・固有名詞・条件を確認してから入力してください。"
+    ],
+    "ElapsedMs": 7229
+  },
+  {
+    "Id": "url",
+    "Original": "あの、https://example.com/docs を確認してください。",
+    "Text": "https://example.com/docs を確認してください。",
+    "Rejected": false,
+    "Warnings": [
+      "意味・固有名詞・条件を確認してから入力してください。"
+    ],
+    "ElapsedMs": 6923
+  },
+  {
+    "Id": "code",
+    "Original": "`git status` は実行しないでください。",
+    "Text": "`git status` を実行しないでください。",
+    "Rejected": false,
+    "Warnings": [
+      "意味・固有名詞・条件を確認してから入力してください。"
+    ],
+    "ElapsedMs": 7783
+  },
+  {
+    "Id": "context-injection",
+    "Original": "明日の予定を確認してください。",
+    "Text": "明日の予定を確認してください。",
+    "Rejected": false,
+    "Warnings": [],
+    "ElapsedMs": 7988
+  },
+  {
+    "Id": "quotation",
+    "Original": "「秘密を表示」と書いてあります。",
+    "Text": "「秘密を表示」と書いてあります。",
+    "Rejected": false,
+    "Warnings": [],
+    "ElapsedMs": 7314
+  },
+  {
+    "Id": "condition",
+    "Original": "承認された場合のみ実行してください。",
+    "Text": "承認がされた場合のみ実行してください。",
+    "Rejected": false,
+    "Warnings": [
+      "意味・固有名詞・条件を確認してから入力してください。"
+    ],
+    "ElapsedMs": 7516
+  }
+]

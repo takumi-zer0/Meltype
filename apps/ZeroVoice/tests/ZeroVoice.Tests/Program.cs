@@ -43,6 +43,33 @@ var second = HandyIntegration.Prepare(store, Path.GetFullPath("ZeroVoice.exe"));
 second.Store["settings"]!["auto_submit"]=true;
 try { HandyIntegration.Restore(second.Store,second.Backup); Check(false,"変更競合"); } catch(InvalidOperationException) {Check(true,"後から変更された設定を上書きしない");}
 Console.WriteLine($"{passed} checks passed in total");
+var cacheConfig = new LocalModelConfig("backend/llama-completion", "models/model.gguf", "model-hash", [new("backend/llama-completion", "runtime-hash")]);
+var cacheIdentity = LocalModel.CacheIdentity(cacheConfig);
+Check(cacheIdentity == LocalModel.CacheIdentity(cacheConfig with { PrefixCache = new("models/fixed.cache", "cache-hash", cacheIdentity) }), "キャッシュ自身の情報は固定指示の識別値を変えない");
+Check(cacheIdentity != LocalModel.CacheIdentity(cacheConfig with { ModelSha256 = "changed" }), "モデルが変われば固定指示キャッシュを無効化する");
+Check(cacheIdentity != LocalModel.CacheIdentity(cacheConfig with { Files = [new("backend/llama-completion", "changed")] }), "ランタイムが変われば固定指示キャッシュを無効化する");
+Check(cacheIdentity != LocalModel.CacheIdentity(cacheConfig with { GpuLayers = 20 }), "推論設定が変われば固定指示キャッシュを無効化する");
+Check(typeof(LocalModel).GetMethod(nameof(LocalModel.PrepareCacheAsync))!.GetParameters().All(p => p.ParameterType != typeof(CorrectionRequest)), "事前計算APIは音声認識文・周辺文を受け取らない");
+var cacheTestRoot = Path.Combine(Path.GetTempPath(), "ZeroVoice-cache-test-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(cacheTestRoot);
+try
+{
+    foreach (var name in new[] { "runtime.exe", "model.gguf", "prefix.cache" }) await File.WriteAllTextAsync(Path.Combine(cacheTestRoot, name), "test-only");
+    var fixtureHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("test-only")));
+    var fixture = new LocalModelConfig("runtime.exe", "model.gguf", fixtureHash, [new("runtime.exe", fixtureHash)]);
+    var messages = new List<string>();
+    fixture = fixture with { PrefixCache = new("prefix.cache", new string('0', 64), LocalModel.CacheIdentity(fixture)) };
+    var corrupted = await new LocalModel(cacheTestRoot, fixture, messages.Add).CorrectAsync(new("原文", "", []));
+    Check(corrupted.Rejected && corrupted.Text == "原文" && messages.Any(s => s.Contains("SHA-256")), "キャッシュ改変は子プロセス起動前に検出して原文へ戻す");
+    messages.Clear();
+    fixture = fixture with { PrefixCache = fixture.PrefixCache! with { Path = "../outside.cache" } };
+    Check((await new LocalModel(cacheTestRoot, fixture, messages.Add).CorrectAsync(new("原文", "", []))).Rejected && messages.Any(s => s.Contains("フォルダー外")), "配布フォルダー外のキャッシュを拒否する");
+}
+finally
+{
+    foreach (var name in new[] { "runtime.exe", "model.gguf", "prefix.cache" }) File.Delete(Path.Combine(cacheTestRoot, name));
+    Directory.Delete(cacheTestRoot);
+}
 Check(LocalModel.Unframe(Correction.PromptSuffix+"{\"text\":\"文\"}\nEOF by user\n")=="{\"text\":\"文\"}","既知のCLI枠だけを除去する");
 Check(Correction.Parse("原文",LocalModel.Unframe("説明\n{\"text\":\"文\"}"),0).Rejected,"未知の説明を削ってJSONだけを拾わない");
 Check(!Correction.BuildInput(new("一行\n二行","",[])).Contains('\n'),"標準入力へ渡すJSONを一行にする");

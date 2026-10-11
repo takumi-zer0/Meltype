@@ -13,4 +13,5 @@ if [[ ! -f "$model_file" ]]; then
 fi
 actual="$(/usr/bin/shasum -a 256 "$model_file" | /usr/bin/awk '{print $1}')"
 [[ "$actual" == "$expected" ]] || { echo 'Model hash mismatch'; exit 1; }
-echo 'ローカルモデルを検証しました。ZeroVoice.app を起動できます。'
+"$package_dir/ZeroVoice.app/Contents/MacOS/ZeroVoice" --prepare-cache
+echo 'ローカルモデルと固定指示を準備しました。ZeroVoice.app を起動できます。'
