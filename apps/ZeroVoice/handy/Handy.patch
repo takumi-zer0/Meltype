@@ -1,14 +1,20 @@
 diff --git a/playwright.correction.config.ts b/playwright.correction.config.ts
 new file mode 100644
-index 0000000..d218d1c
+index 0000000..3a4ccb1
 --- /dev/null
 +++ b/playwright.correction.config.ts
-@@ -0,0 +1,6 @@
+@@ -0,0 +1,12 @@
 +import { defineConfig } from "@playwright/test";
 +export default defineConfig({
-+  testDir: "./tests", testMatch: "correction.spec.ts", workers: 1,
++  testDir: "./tests",
++  testMatch: "correction.spec.ts",
++  workers: 1,
 +  use: { baseURL: "http://127.0.0.1:1420", channel: "chrome", headless: true },
-+  webServer: { command: "bun x vite dev --host 127.0.0.1", url: "http://127.0.0.1:1420/tests/correction.html", reuseExistingServer: true },
++  webServer: {
++    command: "bun x vite dev --host 127.0.0.1",
++    url: "http://127.0.0.1:1420/tests/correction.html",
++    reuseExistingServer: true,
++  },
 +});
 diff --git a/src-tauri/src/actions.rs b/src-tauri/src/actions.rs
 index 04d8864..c2c89dc 100644
@@ -173,10 +179,10 @@ index 04d8864..c2c89dc 100644
                          Err(err) => {
 diff --git a/src-tauri/src/correction.rs b/src-tauri/src/correction.rs
 new file mode 100644
-index 0000000..3ae2329
+index 0000000..798c25c
 --- /dev/null
 +++ b/src-tauri/src/correction.rs
-@@ -0,0 +1,453 @@
+@@ -0,0 +1,451 @@
 +//! Local, reviewed correction. No HTTP listener, shell, transcript log or history.
 +use serde::{Deserialize, Serialize};
 +use serde_json::{json, Value};
@@ -186,7 +192,7 @@ index 0000000..3ae2329
 +use std::path::{Component, Path, PathBuf};
 +use std::process::{Child, ChildStdin, Command, Stdio};
 +use std::sync::{mpsc, Mutex};
-+use std::time::Duration;
++use std::time::{Duration, Instant};
 +use tauri::{AppHandle, Emitter, Manager};
 +use tauri_plugin_clipboard_manager::ClipboardExt;
 +
@@ -414,6 +420,7 @@ index 0000000..3ae2329
 +        Ok(review)
 +    }
 +    fn infer(&self, mut review: Review) -> Result<Review, String> {
++        let timer = Instant::now();
 +        let result = (|| {
 +            let mut worker = self.worker()?;
 +            let response = worker.as_mut().ok_or(UNAVAILABLE)?.request(
@@ -424,6 +431,7 @@ index 0000000..3ae2329
 +            response
 +        })();
 +        review.busy = false;
++        review.elapsed_ms = timer.elapsed().as_millis().min(u128::from(u32::MAX)) as u32;
 +        match result {
 +            Ok(value) if value["id"].as_u64() == Some(u64::from(review.id)) => {
 +                let value = &value["result"];
@@ -435,10 +443,6 @@ index 0000000..3ae2329
 +                review.rejected = value["rejected"].as_bool().unwrap_or(true);
 +                review.warnings =
 +                    serde_json::from_value(value["warnings"].clone()).unwrap_or_default();
-+                review.elapsed_ms = value["elapsedMs"]
-+                    .as_u64()
-+                    .unwrap_or(0)
-+                    .min(u64::from(u32::MAX)) as u32;
 +            }
 +            _ => {
 +                review.rejected = true;
@@ -695,11 +699,11 @@ index 2403772..4c05e52 100644
  }
 diff --git a/src/components/CorrectionReview.tsx b/src/components/CorrectionReview.tsx
 new file mode 100644
-index 0000000..3d8afd3
+index 0000000..61721be
 --- /dev/null
 +++ b/src/components/CorrectionReview.tsx
-@@ -0,0 +1,218 @@
-+import { useEffect, useState } from "react";
+@@ -0,0 +1,238 @@
++import { useEffect, useRef, useState } from "react";
 +import { invoke } from "@tauri-apps/api/core";
 +import { listen } from "@tauri-apps/api/event";
 +import { useTranslation } from "react-i18next";
@@ -725,10 +729,24 @@ index 0000000..3d8afd3
 +  const [approved, setApproved] = useState(false);
 +  const [working, setWorking] = useState(false);
 +  const [error, setError] = useState("");
++  const latest = useRef<Review | null>(null);
++  const closed = useRef(-1);
 +  useEffect(() => {
 +    let disposed = false;
 +    const receive = (value: Review | null) => {
 +      if (disposed) return;
++      if (!value && latest.current) return;
++      if (
++        value &&
++        (value.id <= closed.current ||
++          (latest.current &&
++            (value.id < latest.current.id ||
++              (value.id === latest.current.id &&
++                !latest.current.busy &&
++                value.busy))))
++      )
++        return;
++      latest.current = value;
 +      setReview(value);
 +      setOriginal(value?.original ?? "");
 +      setContext(value?.context ?? "");
@@ -767,8 +785,13 @@ index 0000000..3d8afd3
 +        approved,
 +        paste,
 +      });
++      closed.current = review.id;
 +      setReview(null);
 +    } catch (reason) {
++      if (paste)
++        setReview((current) =>
++          current ? { ...current, canPaste: false } : current,
++        );
 +      fail(reason);
 +    } finally {
 +      setWorking(false);
@@ -789,6 +812,7 @@ index 0000000..3d8afd3
 +  const discard = async () => {
 +    try {
 +      await invoke("correction_discard", { id: review.id });
++      closed.current = review.id;
 +      setReview(null);
 +    } catch (reason) {
 +      fail(reason);
@@ -979,10 +1003,10 @@ index ee58076..6c40cb1 100644
  }
 diff --git a/tests/correction-fixture.tsx b/tests/correction-fixture.tsx
 new file mode 100644
-index 0000000..54640dc
+index 0000000..a74ce65
 --- /dev/null
 +++ b/tests/correction-fixture.tsx
-@@ -0,0 +1,31 @@
+@@ -0,0 +1,48 @@
 +import React from "react";
 +import ReactDOM from "react-dom/client";
 +import i18n from "i18next";
@@ -992,16 +1016,30 @@ index 0000000..54640dc
 +import "../src/App.css";
 +
 +const calls: { command: string; args: Record<string, unknown> }[] = [];
++const callbacks: ((event: unknown) => void)[] = [];
 +const fixture = {
-+  id: 1, original: "えーと、この変更を本番に反映する前に既存の機能影響がないか確認してもらえますか。",
++  id: 1,
++  original:
++    "えーと、この変更を本番に反映する前に既存の機能影響がないか確認してもらえますか。",
 +  context: "リリース前の影響調査を依頼しています。",
 +  text: "この変更を本番に反映する前に、既存の機能に影響がないか確認してもらえますか。",
-+  warnings: [], busy: false, rejected: false, canPaste: true, elapsedMs: 2100,
++  warnings: [],
++  busy: false,
++  rejected: false,
++  canPaste: true,
++  elapsedMs: 2100,
 +};
 +Object.assign(window, {
 +  testCalls: calls,
++  testEmit: (update: Record<string, unknown>) =>
++    callbacks.forEach((callback) =>
++      callback({ payload: { ...fixture, ...update } }),
++    ),
 +  __TAURI_INTERNALS__: {
-+    transformCallback: () => 1,
++    transformCallback: (callback: (event: unknown) => void) => {
++      callbacks.push(callback);
++      return callbacks.length;
++    },
 +    invoke: async (command: string, args: Record<string, unknown>) => {
 +      calls.push({ command, args });
 +      if (command === "correction_pending") return fixture;
@@ -1010,33 +1048,49 @@ index 0000000..54640dc
 +  },
 +  __TAURI_EVENT_PLUGIN_INTERNALS__: { unregisterListener: () => {} },
 +});
-+void i18n.use(initReactI18next).init({ lng: "ja", resources: { ja: { translation: ja } } }).then(() => {
-+  const root = document.getElementById("root");
-+  if (root) ReactDOM.createRoot(root).render(<CorrectionReview />);
-+});
++void i18n
++  .use(initReactI18next)
++  .init({ lng: "ja", resources: { ja: { translation: ja } } })
++  .then(() => {
++    const root = document.getElementById("root");
++    if (root) ReactDOM.createRoot(root).render(<CorrectionReview />);
++  });
 diff --git a/tests/correction.html b/tests/correction.html
 new file mode 100644
-index 0000000..e1b92cf
+index 0000000..3b223e7
 --- /dev/null
 +++ b/tests/correction.html
-@@ -0,0 +1 @@
-+<!doctype html><html lang="ja"><head><meta charset="UTF-8"></head><body><div id="root"></div><script type="module" src="./correction-fixture.tsx"></script></body></html>
+@@ -0,0 +1,10 @@
++<!doctype html>
++<html lang="ja">
++  <head>
++    <meta charset="UTF-8" />
++  </head>
++  <body>
++    <div id="root"></div>
++    <script type="module" src="./correction-fixture.tsx"></script>
++  </body>
++</html>
 diff --git a/tests/correction.spec.ts b/tests/correction.spec.ts
 new file mode 100644
-index 0000000..22da43a
+index 0000000..a5a19f1
 --- /dev/null
 +++ b/tests/correction.spec.ts
-@@ -0,0 +1,28 @@
+@@ -0,0 +1,69 @@
 +import { test, expect } from "@playwright/test";
 +
-+test("approval resets on edits and context changes block insertion", async ({ page }) => {
++test("approval resets on edits and context changes block insertion", async ({
++  page,
++}) => {
 +  await page.goto("/tests/correction.html");
 +  const paste = page.getByRole("button", { name: "元の入力欄に入力" });
 +  const approve = page.getByRole("checkbox");
 +  await expect(paste).toBeDisabled();
 +  await approve.check();
 +  await expect(paste).toBeEnabled();
-+  await page.getByLabel("入力する文章（編集できます）").fill("手動で確認した文章です。");
++  await page
++    .getByLabel("入力する文章（編集できます）")
++    .fill("手動で確認した文章です。");
 +  await expect(approve).not.toBeChecked();
 +  await expect(paste).toBeDisabled();
 +  await approve.check();
@@ -1052,6 +1106,44 @@ index 0000000..22da43a
 +  await page.getByRole("checkbox").check();
 +  await page.getByRole("button", { name: "コピー", exact: true }).click();
 +  await expect(page.getByRole("dialog")).toHaveCount(0);
-+  const calls = await page.evaluate(() => (window as unknown as { testCalls: {command: string; args: unknown}[] }).testCalls.filter(c => c.command === "correction_apply"));
-+  expect(calls).toEqual([{ command: "correction_apply", args: { id: 1, text, approved: true, paste: false } }]);
++  const calls = await page.evaluate(() =>
++    (
++      window as unknown as { testCalls: { command: string; args: unknown }[] }
++    ).testCalls.filter((c) => c.command === "correction_apply"),
++  );
++  expect(calls).toEqual([
++    {
++      command: "correction_apply",
++      args: { id: 1, text, approved: true, paste: false },
++    },
++  ]);
++  await page.evaluate(() =>
++    (
++      window as unknown as {
++        testEmit: (value: Record<string, unknown>) => void;
++      }
++    ).testEmit({ id: 1 }),
++  );
++  await expect(page.getByRole("dialog")).toHaveCount(0);
 +});
++
++test("older or unfinished responses cannot overwrite the current candidate", async ({
++  page,
++}) => {
++  await page.goto("/tests/correction.html");
++  const candidate = page.getByLabel("入力する文章（編集できます）");
++  await expect(candidate).toBeVisible();
++  const text = await candidate.inputValue();
++  await page.evaluate(() => {
++    const emit = (
++      window as unknown as {
++        testEmit: (value: Record<string, unknown>) => void;
++      }
++    ).testEmit;
++    emit({ id: 0, text: "古い結果" });
++    emit({ id: 1, busy: true, text: "処理中の古い状態" });
++  });
++  await expect(candidate).toHaveValue(text);
++  await expect(candidate).toBeEnabled();
++});
+
