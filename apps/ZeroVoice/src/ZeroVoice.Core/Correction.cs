@@ -91,7 +91,7 @@ public static class Correction
 
     public static CorrectionResult Reject(string text, string reason, long elapsedMs = 0) => new(text, text, [reason], true, elapsedMs);
     public static string[] ProtectedTokens(string text) => Regex.Matches(text,
-        @"`[^`\r\n]*`|https?://[^\s<>「」『』。、]+|[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}|(?:[A-Za-z]:[\\/]|\.\.?/)[^\s「」『』。、]+|[0-9０-９]+(?:[.,:/\-．／：][0-9０-９]+)*",
+        @"「[^」\r\n]*」|『[^』\r\n]*』|`[^`\r\n]*`|https?://[^\s<>「」『』。、]+|[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}|(?:[A-Za-z]:[\\/]|\.\.?/)[^\s「」『』。、]+|[0-9０-９]+(?:[.,:/\-．／：][0-9０-９]+)*",
         RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100)).Select(m => m.Value).ToArray();
     private static string[] Negations(string text) => Regex.Matches(text,
         "ではありません|じゃありません|できません|ありません|ません|なかった|なく|ない|禁止|不要|未承認|無効",

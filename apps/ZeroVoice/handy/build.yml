@@ -1,0 +1,138 @@
+name: Handy with ZeroVoice
+on:
+  push:
+    paths: ['apps/ZeroVoice/handy/**', 'apps/ZeroVoice/src/ZeroVoice.Worker/**', '.github/workflows/handy-zerovoice.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            rid: win-x64
+          - os: macos-14
+            target: aarch64-apple-darwin
+            rid: osx-arm64
+          - os: macos-14
+            target: x86_64-apple-darwin
+            rid: osx-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      CMAKE_POLICY_VERSION_MINIMUM: '3.5'
+      DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: {persist-credentials: false}
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: cjpais/Handy
+          ref: 48a3d8e9ee456c1c6a3b7223779271c457890b4d
+          path: handy
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with: {bun-version: '1.4.3'}
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        with: {dotnet-version: '10.0.401'}
+      - name: Apply personal integration and prepare toolchain
+        run: |
+          $ErrorActionPreference='Stop'
+          git -C handy apply ../apps/ZeroVoice/handy/Handy.patch
+          if($LASTEXITCODE){throw 'Patch failed'}
+          rustup toolchain install 1.99.0 --profile minimal --component clippy,rustfmt
+          rustup default 1.99.0
+          rustup target add ${{ matrix.target }}
+          New-Item -ItemType Directory -Force handy/src-tauri/resources/models | Out-Null
+          Invoke-WebRequest https://blob.handy.computer/silero_vad_v4.onnx -OutFile handy/src-tauri/resources/models/silero_vad_v4.onnx
+          $config=Get-Content handy/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $config.bundle.createUpdaterArtifacts=$false
+          $config.bundle.windows.signCommand=$null
+          $config.bundle.macOS.minimumSystemVersion='14.0'
+          $config | ConvertTo-Json -Depth 20 | Set-Content handy/src-tauri/tauri.conf.json -Encoding utf8NoBOM
+      - if: runner.os == 'Windows'
+        uses: humbletim/install-vulkan-sdk@30ba978f977e81b72d091fc8888feb1fb26f9aff
+        with: {version: '1.4.309.0', cache: true}
+      - name: Windows native dependencies
+        if: runner.os == 'Windows'
+        run: |
+          $ErrorActionPreference='Stop'
+          Invoke-WebRequest https://github.com/microsoft/onnxruntime/releases/download/v1.24.2/onnxruntime-win-x64-1.24.2.zip -OutFile ort.zip
+          Expand-Archive ort.zip ort-dist
+          $lib=(Resolve-Path ort-dist/onnxruntime-win-x64-1.24.2/lib).Path
+          Add-Content $env:GITHUB_ENV "ORT_LIB_LOCATION=$lib"
+          Add-Content $env:GITHUB_ENV 'ORT_PREFER_DYNAMIC_LINK=1'
+          vcpkg install spirv-headers:x64-windows
+          if($LASTEXITCODE){throw 'SPIRV install failed'}
+          $prefix="$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows" -replace '\\','/'
+          Add-Content $env:GITHUB_ENV "CMAKE_PREFIX_PATH=$prefix"
+      - name: Intel Mac native dependency
+        if: matrix.rid == 'osx-x64'
+        run: |
+          $ErrorActionPreference='Stop'
+          Invoke-WebRequest https://blob.handy.computer/onnxruntime-osx-x86_64-1.24.2.tgz -OutFile ort.tgz
+          tar xzf ort.tgz
+          $lib=(Resolve-Path onnxruntime-osx-x86_64-1.24.2/lib).Path
+          Add-Content $env:GITHUB_ENV "ORT_LIB_LOCATION=$lib"
+          Add-Content $env:GITHUB_ENV 'ORT_PREFER_DYNAMIC_LINK=1'
+          $config=Get-Content handy/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $config.bundle.macOS | Add-Member frameworks @("$lib/libonnxruntime.1.24.2.dylib")
+          $config | ConvertTo-Json -Depth 20 | Set-Content handy/src-tauri/tauri.conf.json -Encoding utf8NoBOM
+      - name: Build and test correction worker
+        run: |
+          dotnet run --project apps/ZeroVoice/tests/ZeroVoice.Tests -c Release
+          if($LASTEXITCODE){throw 'Correction checks failed'}
+          ./apps/ZeroVoice/handy/build-worker.ps1 -Runtime ${{ matrix.rid }} -Output handy/src-tauri/resources/zerovoice
+      - name: Frontend verification
+        working-directory: handy
+        run: |
+          bun install --frozen-lockfile
+          if($LASTEXITCODE){throw 'Dependencies failed'}
+          bun run build
+          if($LASTEXITCODE){throw 'Frontend failed'}
+          bun run lint
+          if($LASTEXITCODE){throw 'Lint failed'}
+          bun x prettier --check src/components/CorrectionReview.tsx src/App.tsx src/i18n/locales/en/translation.json src/i18n/locales/ja/translation.json
+          if($LASTEXITCODE){throw 'Formatting failed'}
+      - name: Rust verification
+        working-directory: handy/src-tauri
+        run: |
+          cargo fmt --check
+          if($LASTEXITCODE){throw 'Rust formatting failed'}
+          cargo clippy --locked --target ${{ matrix.target }}
+          if($LASTEXITCODE){throw 'Rust check failed'}
+          if('${{ matrix.rid }}' -ne 'osx-x64') {
+            cargo test --locked --target ${{ matrix.target }} correction::tests --lib
+            if($LASTEXITCODE){throw 'Correction integration checks failed'}
+          }
+      - name: Build personal Handy
+        working-directory: handy
+        run: |
+          $bundle=if($IsWindows){@('--no-bundle')}else{@('--bundles','app')}
+          bun run tauri build --target ${{ matrix.target }} @bundle
+          if($LASTEXITCODE){throw 'Handy build failed'}
+      - name: Package
+        run: |
+          New-Item -ItemType Directory -Force package | Out-Null
+          if($IsWindows){
+            Copy-Item handy/src-tauri/target/${{ matrix.target }}/release/handy.exe package/
+            Copy-Item handy/src-tauri/transcribe-libs/* package/ -Recurse
+            Copy-Item handy/src-tauri/resources package/resources -Recurse
+          }else{
+            Copy-Item handy/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Handy.app package/ -Recurse
+          }
+          Copy-Item apps/ZeroVoice/LICENSE package/ZeroVoice-LICENSE
+          Copy-Item handy/LICENSE package/Handy-LICENSE
+          tar -czf Handy-ZeroVoice-${{ matrix.rid }}.tar.gz -C package .
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: Handy-ZeroVoice-${{ matrix.rid }}
+          path: Handy-ZeroVoice-${{ matrix.rid }}.tar.gz
+          retention-days: 7

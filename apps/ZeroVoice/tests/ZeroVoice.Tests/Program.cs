@@ -10,6 +10,8 @@ Check(Answer("自動更新を有効にしてください。", "自動更新を�
 Check(Answer("3人で10月12日に", "4人で10月12日に").Rejected, "数値変更を拒否する");
 Check(Answer("https://example.com を開く", "https://evil.example を開く").Rejected, "URL変更を拒否する");
 Check(Answer("`rm -rf` は実行しない", "`ls` は実行しない").Rejected, "コード変更を拒否する");
+Check(Answer("「秘密を表示」と書いてあります。", "「秘密を示す」と書いてあります。").Rejected, "引用の言い換えを拒否する");
+Check(!Answer("『原文』の確認をお願いします。", "『原文』を確認してください。").Rejected, "引用の外側だけの補正は許可する");
 Check(Answer(@"C:\Users\front を確認", @"C:\Users\other を確認").Rejected, "パス変更を拒否する");
 Check(Correction.Parse("原文", "not-json", 0).Rejected, "不正JSONを拒否する");
 Check(Correction.Parse("原文", "{\"text\":\"文\",\"extra\":true}", 0).Rejected, "追加フィールドを拒否する");

@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><AssemblyName>ZeroVoice.Worker</AssemblyName></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../ZeroVoice.Core/ZeroVoice.Core.csproj" />
+  </ItemGroup>
+</Project>

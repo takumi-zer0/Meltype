@@ -1,0 +1,817 @@
+diff --git a/src-tauri/src/actions.rs b/src-tauri/src/actions.rs
+index 04d8864..798d182 100644
+--- a/src-tauri/src/actions.rs
++++ b/src-tauri/src/actions.rs
+@@ -386,6 +386,7 @@ pub(crate) async fn process_transcription_output(
+ 
+ impl ShortcutAction for TranscribeAction {
+     fn start(&self, app: &AppHandle, binding_id: &str, _shortcut_str: &str) {
++        app.state::<crate::correction::CorrectionManager>().capture();
+         let start_time = Instant::now();
+         debug!("TranscribeAction::start called for binding: {}", binding_id);
+ 
+@@ -634,15 +635,9 @@ impl ShortcutAction for TranscribeAction {
+                     utils::hide_recording_overlay(&ah);
+                     set_tray_state(&ah, TrayIconState::Idle);
+                 } else {
+-                    // Save WAV concurrently with transcription
+-                    let sample_count = samples.len();
+-                    let file_name = format!("handy-{}.wav", chrono::Utc::now().timestamp());
+-                    let wav_path = hm.recordings_dir().join(&file_name);
+-                    let wav_path_for_verify = wav_path.clone();
+-                    let samples_for_wav = samples.clone();
+-                    let wav_handle = tauri::async_runtime::spawn_blocking(move || {
+-                        crate::audio_toolkit::save_wav_file(&wav_path, &samples_for_wav)
+-                    });
++                    // This personal correction build keeps new dictations in memory only.
++                    let file_name = String::new();
++                    let wav_saved = false;
+ 
+                     // Transcribe concurrently with WAV save. If a live stream was
+                     // running, finalize it and use its text (all audio was already
+@@ -659,30 +654,6 @@ impl ShortcutAction for TranscribeAction {
+                         Err(err) => Err(err),
+                     };
+ 
+-                    // Await WAV save and verify
+-                    let wav_saved = match wav_handle.await {
+-                        Ok(Ok(())) => {
+-                            match crate::audio_toolkit::verify_wav_file(
+-                                &wav_path_for_verify,
+-                                sample_count,
+-                            ) {
+-                                Ok(()) => true,
+-                                Err(e) => {
+-                                    error!("WAV verification failed: {}", e);
+-                                    false
+-                                }
+-                            }
+-                        }
+-                        Ok(Err(e)) => {
+-                            error!("Failed to save WAV file: {}", e);
+-                            false
+-                        }
+-                        Err(e) => {
+-                            error!("WAV save task panicked: {}", e);
+-                            false
+-                        }
+-                    };
+-
+                     if rm.was_cancelled_since(cancel_generation) {
+                         debug!("Transcription operation cancelled before output handling");
+                         utils::hide_recording_overlay(&ah);
+@@ -692,85 +663,10 @@ impl ShortcutAction for TranscribeAction {
+ 
+                     match transcription_result {
+                         Ok(transcription) => {
+-                            debug!(
+-                                "Transcription completed in {:?}: '{}'",
+-                                transcription_time.elapsed(),
+-                                utils::redact_text(&transcription)
+-                            );
+-
+-                            if post_process {
+-                                if use_streaming_overlay {
+-                                    tm.emit_stream_working(StreamWorkKind::Polishing);
+-                                } else {
+-                                    show_processing_overlay(&ah);
+-                                }
+-                            }
+-                            let Some(processed) = complete_unless_cancelled(
+-                                process_transcription_output(&ah, &transcription, post_process),
+-                                || rm.was_cancelled_since(cancel_generation),
+-                            )
+-                            .await
+-                            else {
+-                                debug!("Transcription operation cancelled during output handling");
+-                                utils::hide_recording_overlay(&ah);
+-                                set_tray_state(&ah, TrayIconState::Idle);
+-                                return;
+-                            };
+-
+-                            if rm.was_cancelled_since(cancel_generation) {
+-                                debug!("Transcription operation cancelled before paste");
+-                                utils::hide_recording_overlay(&ah);
+-                                set_tray_state(&ah, TrayIconState::Idle);
+-                                return;
+-                            }
+-
+-                            // Save to history if WAV was saved
+-                            if wav_saved {
+-                                if let Err(err) = hm.save_entry(
+-                                    file_name,
+-                                    transcription,
+-                                    post_process,
+-                                    processed.post_processed_text.clone(),
+-                                    processed.post_process_prompt.clone(),
+-                                ) {
+-                                    error!("Failed to save history entry: {}", err);
+-                                }
+-                            }
+-
+-                            if processed.final_text.is_empty() {
+-                                utils::hide_recording_overlay(&ah);
+-                                set_tray_state(&ah, TrayIconState::Idle);
+-                            } else {
+-                                let ah_clone = ah.clone();
+-                                let paste_time = Instant::now();
+-                                let final_text = processed.final_text;
+-                                let rm_for_paste = Arc::clone(&rm);
+-                                ah.run_on_main_thread(move || {
+-                                    if rm_for_paste.was_cancelled_since(cancel_generation) {
+-                                        debug!("Transcription operation cancelled before paste");
+-                                        utils::hide_recording_overlay(&ah_clone);
+-                                        set_tray_state(&ah_clone, TrayIconState::Idle);
+-                                        return;
+-                                    }
+-
+-                                    match utils::paste(final_text, ah_clone.clone()) {
+-                                        Ok(()) => debug!(
+-                                            "Text pasted successfully in {:?}",
+-                                            paste_time.elapsed()
+-                                        ),
+-                                        Err(e) => {
+-                                            error!("Failed to paste transcription: {}", e);
+-                                            let _ = ah_clone.emit("paste-error", ());
+-                                        }
+-                                    }
+-                                    utils::hide_recording_overlay(&ah_clone);
+-                                    set_tray_state(&ah_clone, TrayIconState::Idle);
+-                                })
+-                                .unwrap_or_else(|e| {
+-                                    error!("Failed to run paste on main thread: {:?}", e);
+-                                    utils::hide_recording_overlay(&ah);
+-                                    set_tray_state(&ah, TrayIconState::Idle);
+-                                });
++                            utils::hide_recording_overlay(&ah);
++                            set_tray_state(&ah, TrayIconState::Idle);
++                            if !transcription.trim().is_empty() {
++                                crate::correction::review_transcript(ah.clone(), transcription).await;
+                             }
+                         }
+                         Err(err) => {
+diff --git a/src-tauri/src/correction.rs b/src-tauri/src/correction.rs
+new file mode 100644
+index 0000000..be55c0b
+--- /dev/null
++++ b/src-tauri/src/correction.rs
+@@ -0,0 +1,315 @@
++//! Local, reviewed correction. No HTTP listener, shell, transcript log or history.
++use serde::{Deserialize, Serialize};
++use serde_json::{json, Value};
++use sha2::{Digest, Sha256};
++use std::fs::File;
++use std::io::{BufRead, BufReader, Read, Write};
++use std::path::{Component, Path, PathBuf};
++use std::process::{Child, ChildStdin, Command, Stdio};
++use std::sync::{mpsc, Mutex};
++use std::time::Duration;
++use tauri::{AppHandle, Emitter, Manager};
++use tauri_plugin_clipboard_manager::ClipboardExt;
++
++const UNAVAILABLE: &str = "correction.unavailable";
++const STALE: &str = "correction.stale";
++
++struct Pipe {
++    child: Child,
++    input: ChildStdin,
++    output: mpsc::Receiver<Value>,
++    _verified: Vec<File>,
++}
++
++#[derive(Deserialize)]
++struct VerifiedFile {
++    path: String,
++    sha256: String,
++}
++
++fn verify(root: &Path, manifest: &str) -> Result<Vec<File>, String> {
++    let entries: Vec<VerifiedFile> = serde_json::from_reader(
++        File::open(root.join(manifest)).map_err(|_| UNAVAILABLE)?,
++    )
++    .map_err(|_| UNAVAILABLE)?;
++    if entries.is_empty() || entries.len() > 512 {
++        return Err(UNAVAILABLE.into());
++    }
++    entries
++        .into_iter()
++        .map(|entry| {
++            let relative = Path::new(&entry.path);
++            if relative.components().any(|c| !matches!(c, Component::Normal(_))) {
++                return Err(UNAVAILABLE.into());
++            }
++            let mut options = std::fs::OpenOptions::new();
++            options.read(true);
++            #[cfg(windows)]
++            {
++                use std::os::windows::fs::OpenOptionsExt;
++                options.share_mode(1); // Deny changes while the helper is alive.
++            }
++            let mut file = options.open(root.join(relative)).map_err(|_| UNAVAILABLE)?;
++            let mut hash = Sha256::new();
++            let mut bytes = [0u8; 65536];
++            loop {
++                let count = file.read(&mut bytes).map_err(|_| UNAVAILABLE)?;
++                if count == 0 { break; }
++                hash.update(&bytes[..count]);
++            }
++            if !format!("{:x}", hash.finalize()).eq_ignore_ascii_case(&entry.sha256) {
++                return Err(UNAVAILABLE.into());
++            }
++            Ok(file)
++        })
++        .collect()
++}
++
++impl Pipe {
++    fn start(root: &Path, executable: &str, args: &[&str]) -> Result<Self, String> {
++        let verified = verify(root, "files.json")?;
++        let mut command = Command::new(root.join(executable));
++        command.args(args).current_dir(root).stdin(Stdio::piped())
++            .stdout(Stdio::piped()).stderr(Stdio::null());
++        #[cfg(windows)]
++        {
++            use std::os::windows::process::CommandExt;
++            command.creation_flags(0x08000000);
++        }
++        let mut child = command.spawn().map_err(|_| UNAVAILABLE)?;
++        let input = child.stdin.take().ok_or(UNAVAILABLE)?;
++        let output = child.stdout.take().ok_or(UNAVAILABLE)?;
++        let (tx, rx) = mpsc::sync_channel(1);
++        std::thread::spawn(move || {
++            let mut reader = BufReader::new(output);
++            loop {
++                let mut line = Vec::new();
++                // take() prevents allocation of an unbounded child response.
++                let read = (&mut reader).take(65537).read_until(b'\n', &mut line);
++                if !matches!(read, Ok(1..=65536)) || line.last() != Some(&b'\n') { break; }
++                let Ok(value) = serde_json::from_slice(&line) else { break; };
++                if tx.send(value).is_err() { break; }
++            }
++        });
++        Ok(Self { child, input, output: rx, _verified: verified })
++    }
++    fn read(&self, seconds: u64) -> Result<Value, String> {
++        self.output.recv_timeout(Duration::from_secs(seconds)).map_err(|_| UNAVAILABLE.into())
++    }
++    fn request(&mut self, request: Value, seconds: u64) -> Result<Value, String> {
++        let mut bytes = serde_json::to_vec(&request).map_err(|_| UNAVAILABLE)?;
++        if bytes.len() > 64000 { return Err(UNAVAILABLE.into()); }
++        bytes.push(b'\n');
++        self.input.write_all(&bytes).and_then(|_| self.input.flush()).map_err(|_| UNAVAILABLE)?;
++        self.read(seconds)
++    }
++}
++impl Drop for Pipe {
++    fn drop(&mut self) { let _ = self.child.kill(); let _ = self.child.wait(); }
++}
++
++#[derive(Clone, Default, Serialize, Deserialize, specta::Type)]
++#[serde(rename_all = "camelCase")]
++pub struct Review {
++    id: u32,
++    original: String,
++    context: String,
++    text: String,
++    warnings: Vec<String>,
++    busy: bool,
++    rejected: bool,
++    can_paste: bool,
++    elapsed_ms: u32,
++}
++#[derive(Default)]
++struct Session {
++    id: u32,
++    review: Option<Review>,
++    native: Option<Pipe>,
++    context: String,
++    token: String,
++}
++pub struct CorrectionManager {
++    root: PathBuf,
++    session: Mutex<Session>,
++    worker: Mutex<Option<Pipe>>,
++}
++impl CorrectionManager {
++    pub fn new(app: &AppHandle) -> Self {
++        Self {
++            root: app.path().resource_dir().unwrap_or_default().join("resources/zerovoice"),
++            session: Mutex::new(Session::default()),
++            worker: Mutex::new(None),
++        }
++    }
++    fn worker(&self) -> Result<std::sync::MutexGuard<'_, Option<Pipe>>, String> {
++        let mut guard = self.worker.lock().map_err(|_| UNAVAILABLE)?;
++        if guard.is_none() {
++            let executable = if cfg!(windows) { "ZeroVoice.Worker.exe" } else { "ZeroVoice.Worker" };
++            let pipe = Pipe::start(&self.root, executable, &["--stdio"])?;
++            if pipe.read(90)?.get("ready") != Some(&json!(true)) { return Err(UNAVAILABLE.into()); }
++            *guard = Some(pipe);
++        }
++        Ok(guard)
++    }
++    pub fn warm(&self) { let _ = self.worker(); }
++    // Capture before any Handy window steals focus. Failed capture permits copy only.
++    pub fn capture(&self) {
++        if let Ok(mut session) = self.session.lock() {
++            session.id = session.id.wrapping_add(1);
++            session.review = None;
++            session.native = None;
++            session.context.clear();
++            session.token.clear();
++            let name = if cfg!(windows) { "ZeroVoice.Windows.exe" } else { "ZeroVoice.Mac" };
++            if let Ok(mut pipe) = Pipe::start(&self.root.join("native"), name, &[]) {
++                if let Ok(reply) = pipe.request(json!({"operation":"capture"}), 4) {
++                    if reply["target"]["available"].as_bool() == Some(true) {
++                        session.context = reply["target"]["context"].as_str().unwrap_or("").to_owned();
++                        session.token = reply["target"]["token"].as_str().unwrap_or("").to_owned();
++                        session.native = Some(pipe);
++                    }
++                }
++            }
++        }
++    }
++    fn begin(&self, original: String) -> Result<Review, String> {
++        let mut session = self.session.lock().map_err(|_| UNAVAILABLE)?;
++        validate_text(&original, 6000)?;
++        let review = Review {
++            id: session.id, original: original.clone(), text: original,
++            context: session.context.clone(), can_paste: session.native.is_some(),
++            busy: true, ..Default::default()
++        };
++        session.review = Some(review.clone());
++        Ok(review)
++    }
++    fn infer(&self, mut review: Review) -> Result<Review, String> {
++        let result = (|| {
++            let mut worker = self.worker()?;
++            let response = worker.as_mut().ok_or(UNAVAILABLE)?.request(
++                json!({"id":review.id,"operation":"correct","text":review.original,"context":review.context}), 40);
++            if response.is_err() { *worker = None; }
++            response
++        })();
++        review.busy = false;
++        match result {
++            Ok(value) if value["id"].as_u64() == Some(u64::from(review.id)) => {
++                let value = &value["result"];
++                review.text = value["text"].as_str().unwrap_or(&review.original).to_owned();
++                validate_text(&review.text, 6000)?;
++                review.rejected = value["rejected"].as_bool().unwrap_or(true);
++                review.warnings = serde_json::from_value(value["warnings"].clone()).unwrap_or_default();
++                review.elapsed_ms = value["elapsedMs"].as_u64().unwrap_or(0).min(u64::from(u32::MAX)) as u32;
++            }
++            _ => { review.rejected = true; review.warnings = vec![UNAVAILABLE.into()]; }
++        }
++        let mut session = self.session.lock().map_err(|_| UNAVAILABLE)?;
++        if session.id != review.id || session.review.is_none() { return Err(STALE.into()); }
++        session.review = Some(review.clone());
++        Ok(review)
++    }
++}
++fn validate_text(text: &str, limit: usize) -> Result<(), String> {
++    if text.trim().is_empty() || text.encode_utf16().count() > limit || text.chars().any(|c|
++        (c.is_control() && !matches!(c, '\r' | '\n' | '\t')) || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')) {
++        Err("correction.invalid".into())
++    } else { Ok(()) }
++}
++
++pub async fn review_transcript(app: AppHandle, text: String) {
++    let Ok(review) = app.state::<CorrectionManager>().begin(text) else { return; };
++    let _ = app.emit("correction-review", &review);
++    crate::show_main_window(&app);
++    let cloned = app.clone();
++    let result = tauri::async_runtime::spawn_blocking(move || cloned.state::<CorrectionManager>().infer(review)).await;
++    if let Ok(Ok(review)) = result { let _ = app.emit("correction-review", review); }
++}
++
++#[tauri::command]
++#[specta::specta]
++pub fn correction_pending(app: AppHandle) -> Result<Option<Review>, String> {
++    Ok(app.state::<CorrectionManager>().session.lock().map_err(|_| UNAVAILABLE)?.review.clone())
++}
++
++#[tauri::command]
++#[specta::specta]
++pub async fn correction_retry(app: AppHandle, id: u32, original: String, context: String) -> Result<Review, String> {
++    validate_text(&original, 6000)?;
++    if !context.is_empty() { validate_text(&context, 1200)?; }
++    let review = {
++        let manager = app.state::<CorrectionManager>();
++        let mut session = manager.session.lock().map_err(|_| UNAVAILABLE)?;
++        let prior = session.review.as_ref().ok_or(STALE)?;
++        if session.id != id || prior.busy { return Err(STALE.into()); }
++        session.id = session.id.wrapping_add(1);
++        let review = Review { id: session.id, text: original.clone(), original, context,
++            can_paste: session.native.is_some(), busy: true, ..Default::default() };
++        session.review = Some(review.clone());
++        review
++    };
++    let _ = app.emit("correction-review", &review);
++    let cloned = app.clone();
++    let result = tauri::async_runtime::spawn_blocking(move || cloned.state::<CorrectionManager>().infer(review))
++        .await.map_err(|_| UNAVAILABLE)??;
++    let _ = app.emit("correction-review", &result);
++    Ok(result)
++}
++
++#[tauri::command]
++#[specta::specta]
++pub async fn correction_apply(app: AppHandle, id: u32, text: String, approved: bool, paste: bool) -> Result<(), String> {
++    validate_text(&text, 6000)?;
++    tauri::async_runtime::spawn_blocking(move || {
++        let manager = app.state::<CorrectionManager>();
++        let mut session = manager.session.lock().map_err(|_| UNAVAILABLE)?;
++        let review = session.review.as_ref().ok_or(STALE)?;
++        if !approved || review.busy || session.id != id { return Err(STALE.into()); }
++        // Manual editing is explicit. Never send Enter, even if Handy auto-submit is enabled.
++        if paste {
++            let token = session.token.clone();
++            let mut pipe = session.native.take().ok_or("correction.copyOnly")?;
++            if let Some(review) = session.review.as_mut() { review.can_paste = false; }
++            let reply = pipe.request(json!({"operation":"paste","token":token,"text":text}), 4)?;
++            if reply["ok"].as_bool() != Some(true) { return Err("correction.copyOnly".into()); }
++        } else {
++            app.clipboard().write_text(text).map_err(|_| "correction.copyOnly")?;
++        }
++        session.review = None;
++        session.native = None;
++        session.context.clear(); session.token.clear();
++        Ok(())
++    }).await.map_err(|_| UNAVAILABLE)?
++}
++
++#[tauri::command]
++#[specta::specta]
++pub fn correction_discard(app: AppHandle, id: u32) -> Result<(), String> {
++    let manager = app.state::<CorrectionManager>();
++    let mut session = manager.session.lock().map_err(|_| UNAVAILABLE)?;
++    if session.id != id { return Err(STALE.into()); }
++    session.id = session.id.wrapping_add(1);
++    session.review = None; session.native = None;
++    session.context.clear(); session.token.clear();
++    Ok(())
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    #[test]
++    fn input_bounds_and_controls() {
++        assert!(validate_text("仕様を確認してください。", 6000).is_ok());
++        assert!(validate_text("\u{202e}秘密", 6000).is_err());
++        assert!(validate_text(&"あ".repeat(6001), 6000).is_err());
++        assert!(validate_text(" \n", 6000).is_err());
++    }
++    #[test]
++    fn stale_result_cannot_replace_new_recording() {
++        let manager = CorrectionManager { root: PathBuf::new(), session: Mutex::new(Session::default()), worker: Mutex::new(None) };
++        let review = manager.begin("元の文".into()).expect("fixture");
++        manager.session.lock().expect("fixture").id += 1;
++        assert!(manager.infer(review).is_err());
++        assert_eq!(manager.session.lock().expect("fixture").review.as_ref().expect("fixture").original, "元の文");
++    }
++}
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index a41d62c..020e033 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -1,3 +1,4 @@
++mod correction;
+ mod actions;
+ #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+ mod apple_intelligence;
+@@ -651,6 +652,10 @@ pub fn run(cli_args: CliArgs) {
+ 
+     let specta_builder = Builder::<tauri::Wry>::new()
+         .commands(collect_commands![
++            correction::correction_pending,
++            correction::correction_retry,
++            correction::correction_apply,
++            correction::correction_discard,
+             shortcut::change_binding,
+             shortcut::reset_binding,
+             shortcut::change_shortcut_activation_setting,
+@@ -1010,6 +1015,9 @@ pub fn run(cli_args: CliArgs) {
+             let app_handle = app.handle().clone();
+             app.manage(TranscriptionCoordinator::new(app_handle.clone()));
+ 
++            app.manage(correction::CorrectionManager::new(&app_handle));
++            let correction_handle = app_handle.clone();
++            std::thread::spawn(move || correction_handle.state::<correction::CorrectionManager>().warm());
+             initialize_core_logic(&app_handle);
+ 
+             // Secure Input monitor (macOS): detects stuck secure input that
+diff --git a/src-tauri/src/main.rs b/src-tauri/src/main.rs
+index 025a42b..fc27641 100644
+--- a/src-tauri/src/main.rs
++++ b/src-tauri/src/main.rs
+@@ -5,6 +5,8 @@ use clap::Parser;
+ use handy_app_lib::CliArgs;
+ 
+ fn main() {
++    // Keep this personal build from being replaced by the upstream updater.
++    std::env::set_var("HANDY_DISABLE_UPDATER", "1");
+     #[cfg(target_os = "linux")]
+     {
+         // DMABUF renderer causes crashes on various GPU/display server configurations
+diff --git a/src/App.tsx b/src/App.tsx
+index 2403772..4c05e52 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -1,3 +1,4 @@
++import { CorrectionReview } from "./components/CorrectionReview";
+ import {
+   useEffect,
+   useLayoutEffect,
+@@ -385,6 +386,7 @@ function App() {
+     <>
+       {toaster}
+       {content}
++      <CorrectionReview />
+     </>
+   );
+ }
+diff --git a/src/components/CorrectionReview.tsx b/src/components/CorrectionReview.tsx
+new file mode 100644
+index 0000000..3d8afd3
+--- /dev/null
++++ b/src/components/CorrectionReview.tsx
+@@ -0,0 +1,218 @@
++import { useEffect, useState } from "react";
++import { invoke } from "@tauri-apps/api/core";
++import { listen } from "@tauri-apps/api/event";
++import { useTranslation } from "react-i18next";
++
++interface Review {
++  id: number;
++  original: string;
++  context: string;
++  text: string;
++  warnings: string[];
++  busy: boolean;
++  rejected: boolean;
++  canPaste: boolean;
++  elapsedMs: number;
++}
++
++export function CorrectionReview() {
++  const { t } = useTranslation();
++  const [review, setReview] = useState<Review | null>(null);
++  const [original, setOriginal] = useState("");
++  const [context, setContext] = useState("");
++  const [text, setText] = useState("");
++  const [approved, setApproved] = useState(false);
++  const [working, setWorking] = useState(false);
++  const [error, setError] = useState("");
++  useEffect(() => {
++    let disposed = false;
++    const receive = (value: Review | null) => {
++      if (disposed) return;
++      setReview(value);
++      setOriginal(value?.original ?? "");
++      setContext(value?.context ?? "");
++      setText(value?.text ?? "");
++      setApproved(false);
++      setError("");
++    };
++    const subscription = listen<Review>("correction-review", ({ payload }) =>
++      receive(payload),
++    );
++    void subscription
++      .then(() => invoke<Review | null>("correction_pending").then(receive))
++      .catch(() => {});
++    return () => {
++      disposed = true;
++      void subscription.then((unlisten) => unlisten());
++    };
++  }, []);
++  if (!review) return null;
++  const busy = review.busy || working;
++  const dirty = original !== review.original || context !== review.context;
++  const fail = (reason: unknown) => {
++    const key =
++      typeof reason === "string" && reason.startsWith("correction.")
++        ? reason
++        : "correction.unavailable";
++    setError(t(key));
++    setApproved(false);
++  };
++  const apply = async (paste: boolean) => {
++    setWorking(true);
++    try {
++      await invoke("correction_apply", {
++        id: review.id,
++        text,
++        approved,
++        paste,
++      });
++      setReview(null);
++    } catch (reason) {
++      fail(reason);
++    } finally {
++      setWorking(false);
++    }
++  };
++  const retry = async () => {
++    setWorking(true);
++    setApproved(false);
++    setError("");
++    try {
++      await invoke("correction_retry", { id: review.id, original, context });
++    } catch (reason) {
++      fail(reason);
++    } finally {
++      setWorking(false);
++    }
++  };
++  const discard = async () => {
++    try {
++      await invoke("correction_discard", { id: review.id });
++      setReview(null);
++    } catch (reason) {
++      fail(reason);
++    }
++  };
++  return (
++    <div
++      role="dialog"
++      aria-modal="true"
++      aria-labelledby="correction-title"
++      className="fixed inset-0 z-[100] bg-background text-text overflow-y-auto p-5"
++    >
++      <div className="max-w-3xl mx-auto flex flex-col gap-3">
++        <h1 id="correction-title" className="text-xl font-semibold">
++          {t("correction.title")}
++        </h1>
++        <p className="text-sm opacity-75">{t("correction.description")}</p>
++        <label className="flex flex-col gap-1 text-sm">
++          {t("correction.original")}
++          <textarea
++            value={original}
++            disabled={busy}
++            maxLength={6000}
++            rows={2}
++            className="border rounded p-2 bg-background"
++            onChange={(e) => {
++              setOriginal(e.target.value);
++              setApproved(false);
++            }}
++          />
++        </label>
++        <label className="flex flex-col gap-1 text-sm">
++          {t("correction.context")}
++          <textarea
++            value={context}
++            disabled={busy}
++            maxLength={1200}
++            rows={2}
++            className="border rounded p-2 bg-background"
++            onChange={(e) => {
++              setContext(e.target.value);
++              setApproved(false);
++            }}
++          />
++        </label>
++        <button
++          disabled={busy || !original.trim()}
++          onClick={() => void retry()}
++          className="border rounded p-2 disabled:opacity-40"
++        >
++          {t("correction.retry")}
++        </button>
++        <label className="flex flex-col gap-1 text-sm">
++          {t("correction.result")}
++          <textarea
++            value={text}
++            disabled={busy || dirty}
++            maxLength={6000}
++            rows={3}
++            className="border rounded p-2 bg-background"
++            onChange={(e) => {
++              setText(e.target.value);
++              setApproved(false);
++            }}
++          />
++        </label>
++        <p role="status" className="text-sm">
++          {busy
++            ? t("correction.processing")
++            : t("correction.elapsed", {
++                seconds: (review.elapsedMs / 1000).toFixed(1),
++              })}
++        </p>
++        {review.rejected && (
++          <p className="text-sm">{t("correction.rejected")}</p>
++        )}
++        {review.warnings.map((warning, index) => (
++          <p className="text-sm" key={index}>
++            {warning.startsWith("correction.") ? t(warning) : warning}
++          </p>
++        ))}
++        {!review.canPaste && (
++          <p className="text-sm">{t("correction.copyOnly")}</p>
++        )}
++        {dirty && <p className="text-sm">{t("correction.dirty")}</p>}
++        {error && (
++          <p role="alert" className="text-sm text-red-500">
++            {error}
++          </p>
++        )}
++        <label className="flex gap-2 text-sm items-center">
++          <input
++            type="checkbox"
++            checked={approved}
++            disabled={busy || dirty}
++            onChange={(e) => setApproved(e.target.checked)}
++          />
++          {t("correction.approve")}
++        </label>
++        <div className="flex gap-2 pb-4">
++          <button
++            onClick={() => void apply(true)}
++            disabled={
++              busy || dirty || !approved || !text.trim() || !review.canPaste
++            }
++            className="border rounded p-2 disabled:opacity-40"
++          >
++            {t("correction.paste")}
++          </button>
++          <button
++            onClick={() => void apply(false)}
++            disabled={busy || dirty || !approved || !text.trim()}
++            className="border rounded p-2 disabled:opacity-40"
++          >
++            {t("correction.copy")}
++          </button>
++          <button
++            onClick={() => void discard()}
++            disabled={working}
++            className="border rounded p-2 disabled:opacity-40"
++          >
++            {t("correction.discard")}
++          </button>
++        </div>
++      </div>
++    </div>
++  );
++}
+diff --git a/src/i18n/locales/en/translation.json b/src/i18n/locales/en/translation.json
+index 088a11c..13d1b4c 100644
+--- a/src/i18n/locales/en/translation.json
++++ b/src/i18n/locales/en/translation.json
+@@ -724,5 +724,25 @@
+     "learnMore": "How to fix",
+     "recorderBlocked": "Can't record shortcuts right now — macOS Secure Input is blocking key events. Resolve the Secure Input warning first.",
+     "dismiss": "Dismiss"
++  },
++  "correction": {
++    "title": "Japanese correction · ZeroVoice",
++    "description": "Correct the whole sentence using context, on this computer. Review the meaning before inserting. New dictations and context are not saved to history.",
++    "original": "Speech recognition",
++    "context": "Surrounding context (optional)",
++    "retry": "Correct again",
++    "result": "Text to insert (editable)",
++    "processing": "Correcting locally… First model load takes longer.",
++    "elapsed": "Correction: {{seconds}} s",
++    "rejected": "The candidate could not be verified. The original text has been kept.",
++    "copyOnly": "The original input field is unavailable or changed. Copy and paste manually.",
++    "dirty": "Run correction again after changing the original or context.",
++    "approve": "I have checked the meaning, names, numbers and conditions of this text.",
++    "paste": "Insert in original field",
++    "copy": "Copy",
++    "discard": "Discard",
++    "unavailable": "Local correction is unavailable. The original text remains available to review and copy.",
++    "stale": "This result is no longer current. Use the latest recording.",
++    "invalid": "Check the text length and remove unsupported control characters."
+   }
+ }
+diff --git a/src/i18n/locales/ja/translation.json b/src/i18n/locales/ja/translation.json
+index ee58076..6c40cb1 100644
+--- a/src/i18n/locales/ja/translation.json
++++ b/src/i18n/locales/ja/translation.json
+@@ -724,5 +724,25 @@
+     "learnMore": "解決方法",
+     "recorderBlocked": "現在ショートカットを記録できません。macOS の Secure Input がキーイベントをブロックしています。先に Secure Input の警告を解消してください。",
+     "dismiss": "閉じる"
++  },
++  "correction": {
++    "title": "日本語補正 · ZeroVoice",
++    "description": "このPCで文脈と文章全体から誤認識・誤変換を補正します。意味を確認してから入力してください。新しい録音・認識文・文脈は履歴に保存しません。",
++    "original": "音声認識した文章",
++    "context": "周辺の文脈（任意）",
++    "retry": "もう一度補正",
++    "result": "入力する文章（編集できます）",
++    "processing": "このPCで補正中… 初回はモデルの読み込みに時間がかかります。",
++    "elapsed": "補正時間：{{seconds}}秒",
++    "rejected": "補正候補を確認できなかったため、原文を残しました。",
++    "copyOnly": "元の入力欄を確認できないか、入力欄が変わっています。コピーして手動で貼り付けてください。",
++    "dirty": "原文や文脈を変更したため、もう一度補正してください。",
++    "approve": "この文章の意味・固有名詞・数字・条件を確認しました。",
++    "paste": "元の入力欄に入力",
++    "copy": "コピー",
++    "discard": "破棄",
++    "unavailable": "ローカル補正を利用できません。原文を確認してコピーできます。",
++    "stale": "この結果は古くなっています。新しい録音の結果を使ってください。",
++    "invalid": "文章の長さと制御文字を確認してください。"
+   }
+ }
