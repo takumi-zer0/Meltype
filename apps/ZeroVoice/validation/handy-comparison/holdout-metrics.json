@@ -1,0 +1,19 @@
+[
+  {
+    "model": "gemma",
+    "n": 8,
+    "medianMs": 3310.0,
+    "minMs": 1306,
+    "maxMs": 3702
+  },
+  {
+    "model": "luna",
+    "n": 8,
+    "medianMs": 1682.5,
+    "minMs": 1126,
+    "maxMs": 2625,
+    "inputTokens": 4440,
+    "outputTokens": 264,
+    "estimatedUsd": 0.000576
+  }
+]

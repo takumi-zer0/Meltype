@@ -1,0 +1,1 @@
+{"loadMs":27574,"results":[{"id":"holdout-payment","original":"購入した周辺機器の台金は、来月の請求書にまとめてください。","text":"購入した周辺機器の代金は、来月の請求書にまとめてください。","rejected":false,"warnings":["意味・固有名詞・条件を確認してから入力してください。"],"elapsedMs":9675},{"id":"holdout-negation-amount","original":"見積書の金額は15万円ではなく、18万円でお願いします。","text":"見積書の金額は15万円ではなく、18万円でお願いします。","rejected":false,"warnings":[],"elapsedMs":11584}]}
